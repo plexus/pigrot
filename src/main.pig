@@ -1,4 +1,5 @@
 (module main
+  "Roguelike demo Piglet project"
   (:import
     [dialogs :from dialogs]
     [str :from piglet:string]
@@ -155,9 +156,9 @@
           [[["  "] [title]]
            [[""]]])
         (for [{:keys [title glyph]} items]
-        (into
-          [(or glyph " ") " "]
-          [[title]])))
+          (into
+            [(or glyph " ") " "]
+            [[title]])))
       (cond-> selected title (+ 2)))
     (:width display-opts)
     (:height display-opts)))
