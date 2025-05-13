@@ -26,7 +26,15 @@
    :tweezers ["v" "#acb5b5"]})
 
 (def entities
-  {:tweezers {:description "An old rusty pair of tweezers"}})
+  {:tweezers {:name "Tweezers"
+              :description "An old rusty pair of tweezers"
+              :weight 1}
+   :sassafras {:name "Sassafras Bark"
+               :description "It emits a pleasant, herbal aroma. Makes you crave for rootbeer."
+               :weight 1}
+   :sandwich {:name "Sandwich"
+              :description "A sandwich with an unidentifiable vegan spread, lettuce, and tomato. The bread has gone a little soggy."}
+   })
 
 (def base-keymap
   {:LEFT   :player/move-self
@@ -69,7 +77,13 @@
       {:x x
        :y y
        :tile :player
-       :passable #{:air}}))
+       :passable #{:air}
+       :inventory [[:sassafras (rand-int 12)]
+                   [:tweezers 1]
+                   [:tweezers 1]
+                   [:tweezers 1]
+                   [:tweezers 1]
+                   [:sandwich 1]]}))
 
   (e:redraw!))
 
@@ -88,64 +102,32 @@
     (e:try-move-by! :player 0 1))
   (e:redraw!))
 
-(defmethod e:do-action :menu/nop [_])
-(defmethod e:do-action :menu/prev [_]
-  (swap! e:state update :dialogs
-    (fn [dialogs]
-      (update dialogs (dec (count dialogs))
-        (fn [dialog]
-          (if (= :menu (:type dialog))
-            (assoc dialog :selected  (max 0 (dec (:secleced dialog))))
-            dialog)))))
-  (e:redraw!))
 
-(defmethod e:do-action :menu/next [_]
-  (swap! e:state update :dialogs
-    (fn [dialogs]
-      (update dialogs (dec (count dialogs))
-        (fn [dialog]
-          (if (= :menu (:type dialog))
-            (assoc dialog :selected (min (dec (count (:items dialog))) (inc (:secleced dialog))))
-            dialog)))))
-  (e:redraw!))
-
-(defmethod e:do-action :menu/close [_]
-  (swap! e:state
-    (fn [state]
-      (-> state
-        (update :dialogs butlast)
-        (update :keymaps butlast))))
-  (e:redraw!))
+(def action-menu
+  {:title "ACTIONS"
+   :items [{:title "Inventory"
+            :glyph ["I" "#0bc815"]
+            :action :menu/inventory}
+           {:title "Look"
+            :glyph ["&" "#4195ef"]
+            :action :menu/look}]})
 
 (defmethod e:do-action :menu/show-global [_]
-  (swap! e:state
-    (fn [state]
-      (-> state
-        (update :dialogs
-          conj
-          {:type :menu
-           :selected 0
-           :title "ACTIONS"
-           :items [{:title "Inventory"
-                    :glyph ["I" "#0bc815"]
-                    :action :menu/inventory}
-                   {:title "Look"
-                    :glyph ["&" "#4195ef"]
-                    :action :menu/look}]})
-        (update :keymaps
-          conj
-          {:UP :menu/prev
-           :DOWN :menu/next
-           :ESCAPE :menu/close
-           :RETURN :menu/dispatch
-           :LEFT :nop
-           :RIGHT :nop}))))
+  (e:show-menu! action-menu)
+  (e:redraw!))
+
+(defmethod e:do-action :menu/inventory [_]
+  (e:show-menu!
+    {:title "  INVENTORY  "
+     :items (for [[item qty] (:inventory (e:entv :player))]
+              {:title (str (str:pad-start (str qty) 3 " ")
+                        " "
+                        (get-in entities [item :name]))})})
   (e:redraw!))
 
 (defmethod e:do-action :menu/dispatch [_]
   (let [menu (last (:dialogs @e:state))
         item (nth (:items menu) (:selected menu))]
-    (e:do-action {:type :menu/close})
     (e:do-action {:type (:action item)})))
 
 (init!)

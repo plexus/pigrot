@@ -109,8 +109,6 @@
             (update :y + dy))
           pos)))))
 
-(passable? :player 5 1)
-
 ;; Drawing
 
 (defn draw! [x y ch fg bg]
@@ -144,8 +142,9 @@
            [[""]]])
         (for [{:keys [title glyph]} items]
           (into
-            [(or glyph " ") " "]
-            [[title]])))
+            [" " (or glyph " ") " "]
+            [[title]
+             ["  "]])))
       (cond-> selected title (+ 2)))
     (viewport-width)
     (viewport-height)))
@@ -153,14 +152,10 @@
 (defn redraw! []
   (let [start-ms (js:performance.now)
         {:keys [environment entities dialogs]} @state
-        dialog (some-> dialogs first render-dialog)]
+        dialog (some-> dialogs last render-dialog)]
     (draw-env! environment dialog)
     (draw-entities! entities dialog)
     (println "redraw took " (str (- (js:performance.now) start-ms) "ms") (str "(" (/ 1000 (- (js:performance.now) start-ms))" fps)"))))
-
-(dotimes [i 100]
-  (redraw!,
-    ))
 
 ;; Actions
 
@@ -186,7 +181,47 @@
       (dom:query-one "#app")
       (.getContainer display))))
 
-(entv :player)
-{:x 49, :y 38, :tile :player, :passable #{:air}}
-(ent-set! :player :y 49)
-(redraw!)
+(def menu-keymap
+  {:UP :menu/prev
+   :DOWN :menu/next
+   :ESCAPE :menu/close
+   :RETURN :menu/dispatch
+   :LEFT :nop
+   :RIGHT :nop})
+
+(defn show-menu! [menu-spec]
+  (swap! state
+    (fn [state]
+      (-> state
+        (update :dialogs conj (merge {:type :menu :selected 0} menu-spec))
+        (update :keymaps conj menu-keymap)))))
+
+(defmethod do-action :menu/nop [_])
+
+(defmethod do-action :menu/prev [_]
+  (swap! state update :dialogs
+    (fn [dialogs]
+      (update dialogs (dec (count dialogs))
+        (fn [dialog]
+          (if (= :menu (:type dialog))
+            (assoc dialog :selected  (max 0 (dec (:selected dialog))))
+            dialog)))))
+  (redraw!))
+
+(defmethod do-action :menu/next [_]
+  (swap! state update :dialogs
+    (fn [dialogs]
+      (update dialogs (dec (count dialogs))
+        (fn [dialog]
+          (if (= :menu (:type dialog))
+            (assoc dialog :selected (min (dec (count (:items dialog))) (inc (:selected dialog))))
+            dialog)))))
+  (redraw!))
+
+(defmethod do-action :menu/close [_]
+  (swap! state
+    (fn [state]
+      (-> state
+        (update :dialogs butlast)
+        (update :keymaps butlast))))
+  (redraw!))
