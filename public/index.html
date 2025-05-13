@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1" name="viewport">
+<link rel="stylesheet" href="/styles.css"></link>
+<link rel="stylesheet" href="/victor_mono.css"></link>
+<script type="importmap">
+  {"imports":{"astring":"/npm/astring","rot-js":"/npm/rot-js"}}
+</script>
+<script type="application/javascript" src="https://unpkg.com/source-map@0.7.3/dist/source-map.js">
+</script>
+<script type="module" src="/piglet/lib/piglet/browser/main.mjs?verbosity=0"></script>
+<script type="piglet">
+  (let [pkg (await (load-package "/self"))]
+   (await (require (qsym (str (.-name pkg) ":" "main")))))
+  (await (require (quote https://piglet-lang.org/packages/piglet:pdp-client)))(piglet:pdp-client:connect! "ws://127.0.0.1:17017")
+</script>
+</head>
+<body>
+<div id="app"></div>
+</body>
+</html>
