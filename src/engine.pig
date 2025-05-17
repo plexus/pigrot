@@ -13,12 +13,15 @@
 (def state
   "Game state"
   (box
+    #js
     {:display-opts {}
      :keymaps []
      :dialogs []
      :environment []
      :entities {}
-     :tiles {}}))
+     :tiles {}
+     :queue nil
+     :controller nil}))
 
 (def keycodes
   "numeric code -> keyword, e.g. 14 :ENTER"
@@ -34,6 +37,9 @@
 
 (defn viewport-height []
   (get-in @state [:display-opts :height]))
+
+(defn queue []
+  (:queue @state))
 
 (defn entv [eid]
   (get-in @state [:entities eid]))
@@ -87,9 +93,12 @@
 
 (defn ent-set!
   ([eid val]
-    (swap! state update :entities assoc eid val))
+    (swap! state update :entities assoc eid (assoc val :eid eid)))
   ([eid k v]
     (swap! state assoc-in [:entities eid k] v)))
+
+(defn eids-by-trait [t]
+  (filter (comp t :traits) (vals (:entities @state))))
 
 (defn move-by! [eid dx dy]
   (entswap! eid
@@ -99,24 +108,51 @@
         (update :y + dy)))))
 
 (defn try-move-by! [eid dx dy]
-  (entswap! eid
-    (fn [pos]
-      (let [x (+ (:x pos) dx)
-            y (+ (:y pos) dy)]
-        (if (passable? eid x y)
-          (-> pos
-            (update :x + dx)
-            (update :y + dy))
-          pos)))))
+  (let [{:keys [x y]} (entv eid)
+        x (+ x dx)
+        y (+ y dy)]
+    (when (passable? eid x y)
+      (entswap! eid
+        #(-> % (update :x + dx) (update :y + dy)))
+      true)))
 
 ;; Drawing
+
+(defn fov-fn []
+  (let [map (:environment @state)
+        entities #js {}]
+    (doseq [{:keys [x y blocks-vision?]} (vals (:entities @state))
+            :when (and x y blocks-vision?)]
+      (update! entities x (fnil assoc! #js {}) y true))
+    (fn light-passes [x y]
+      (not
+        (or
+          (get-in map [y x :blocks-vision?])
+          (get-in entities [x y]))))))
+
+(defn fov-instance []
+  (rot:FOV.PreciseShadowcasting. (fov-fn)))
+
+(defn fov [x y r]
+  (let [fov #js {}]
+    (.compute (fov-instance)
+      x y r
+      (fn [x y r visible?]
+        (when (and visible?)
+          (update! fov x (fnil assoc! #js {}) y true))))
+    fov))
+
+(defn efov [eid]
+  (let [{:keys [x y vision]} (entv eid)]
+    (fov x y vision)))
 
 (defn draw! [x y ch fg bg]
   (.draw (:display @state) x y ch fg bg))
 
-(defn draw-env! [env dialog]
+(defn draw-env! [env dialog visible]
   (doseq [[row y] (map js:Array env (range))
-          [env-tile x] (map js:Array row (range))]
+          [env-tile x] (map js:Array row (range))
+          :when (get-in visible [x y])]
     (if-let [d (get-in dialog [y x])]
       (let [[char fg bg] d]
         (draw! x y char fg bg))
@@ -124,12 +160,13 @@
             [char fg bg] (tile type)]
         (draw! x y char fg bg)))))
 
-(defn draw-entities! [entities dialog]
-  (doseq [[eid {:keys [x y] tile-type :tile}] entities]
-    (when (and tile x y (not (get-in dialog [y x])))
-      (let [[char fg bg] (tile tile-type)
-            env (env-by-coords x y)]
-        (draw! x y char fg (or bg (last (tile (:type env)))))))))
+(defn draw-entities! [entities dialog visible]
+  (doseq [[eid {:keys [x y] tile-type :tile}] entities
+          :when (and tile x y (not (get-in dialog [y x])))
+          :when (get-in visible [x y])
+          :let [[char fg bg] (tile tile-type)
+                env (env-by-coords x y)]]
+    (draw! x y char fg (or bg (last (tile (:type env)))))))
 
 (defmulti render-dialog (fn [{:keys [type]}] type))
 
@@ -138,7 +175,7 @@
     (dialogs:render-menu
       (concat
         (when title
-          [[["  "] [title]]
+          [^:center [[title]]
            [[""]]])
         (for [{:keys [title glyph]} items]
           (into
@@ -149,12 +186,25 @@
     (viewport-width)
     (viewport-height)))
 
+(defmethod render-dialog :dialog [{:keys [title text buttons] :as dialog}]
+  (println dialog)
+  (dialogs:draw-center
+    (dialogs:render-box
+      (map #(with-meta % {:center true})
+        (into [title
+               []]
+          (dialogs:split-line text 35))))
+    (viewport-width)
+    (viewport-height)))
+
 (defn redraw! []
   (let [start-ms (js:performance.now)
-        {:keys [environment entities dialogs]} @state
-        dialog (some-> dialogs last render-dialog)]
-    (draw-env! environment dialog)
-    (draw-entities! entities dialog)
+        {:keys [environment entities dialogs display]} @state
+        dialog (some-> dialogs last render-dialog)
+        visible (some-> @state :controller efov)]
+    (.clear display)
+    (draw-env! environment dialog visible)
+    (draw-entities! entities dialog visible)
     (println "redraw took " (str (- (js:performance.now) start-ms) "ms") (str "(" (/ 1000 (- (js:performance.now) start-ms))" fps)"))))
 
 ;; Actions
@@ -164,18 +214,25 @@
 (defn on-keydown [e]
   (let [c (.-keyCode e)
         k (get keycodes c)
-        keymap (last (:keymaps @state :keymaps))]
-    (if-let [action (get keymap k)]
-      (do-action {:type action
-                  :keyname k
-                  :keycode c}))))
+        keymap (last (:keymaps @state))]
+    (when-let [action (get keymap k)]
+      (if (vector? action)
+        (do-action
+          (merge (second action)
+            {:type (first action)
+             :keyname k
+             :keycode c}))
+        (do-action {:type action
+                    :keyname k
+                    :keycode c})))))
 
 (defn init! [opts]
   (let [display (rot:Display. (into #js {} (:display-opts opts)))]
     (swap! state (fn [state]
                    (assoc
                      (merge state opts)
-                     :display display)))
+                     :display display
+                     :queue (rot:EventQueue.))))
     (dom:listen! js:window ::keyboard "keydown" #'on-keydown)
     (dom:append
       (dom:query-one "#app")
@@ -184,10 +241,14 @@
 (def menu-keymap
   {:UP :menu/prev
    :DOWN :menu/next
-   :ESCAPE :menu/close
+   :ESCAPE :dialog/close
    :RETURN :menu/dispatch
    :LEFT :nop
    :RIGHT :nop})
+
+(def dialog-keymap
+  {:ESCAPE :dialog/close
+   :RETURN :dialog/close})
 
 (defn show-menu! [menu-spec]
   (swap! state
@@ -195,6 +256,13 @@
       (-> state
         (update :dialogs conj (merge {:type :menu :selected 0} menu-spec))
         (update :keymaps conj menu-keymap)))))
+
+(defn show-dialog! [dialog-spec]
+  (swap! state
+    (fn [state]
+      (-> state
+        (update :dialogs conj (merge {:type :dialog} dialog-spec))
+        (update :keymaps conj (merge dialog-keymap (:keymap dialog-spec)))))))
 
 (defmethod do-action :menu/nop [_])
 
@@ -218,10 +286,38 @@
             dialog)))))
   (redraw!))
 
-(defmethod do-action :menu/close [_]
+(defmethod do-action :dialog/close [_]
   (swap! state
     (fn [state]
       (-> state
         (update :dialogs butlast)
         (update :keymaps butlast))))
   (redraw!))
+
+(defmethod do-action :menu/dispatch [_]
+  (let [menu (last (:dialogs @state))
+        item (nth (:items menu) (:selected menu))]
+    (do-action (assoc item :type (:action item)))))
+
+(defmethod do-action :default [e]
+  (println "Missing action for " e))
+
+(defmulti handle-state (fn [entity] (:state entity)))
+
+(defmethod handle-state :controller [{:keys [eid] :as e}]
+  (swap! state assoc :controller eid))
+
+(defn tick! [eid time]
+  (let [q (queue)]
+    (.add q eid time)
+    (when-let [eid (.get q)]
+      (handle-state (entv eid)))))
+
+(defmethod handle-state :idle [{:keys [eid] :as e}]
+  (tick! eid 100))
+
+(defn start-engine! []
+  (let [q (queue)]
+    (doseq [{:keys [eid] :as e} (eids-by-trait :active)]
+      (.add q eid (if (number? eid) eid 0))))
+  (tick!))

@@ -38,4 +38,5 @@
     (e:ent-set! (e:new-eid)
       {:x x
        :y y
+       :blocks-vision? true
        :tile :tree})))

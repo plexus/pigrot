@@ -22,18 +22,27 @@
    :player ["@" "#DAF7A6"]
    :tree   ["Λ" "#0bc815"]
    :ram    ["Ꮘ" "#a19c6f"]
-   :water  ["~" "#8ec4ff" "#4195ef"]
-   :tweezers ["v" "#acb5b5"]})
+   :water  ["≋" "#8ec4ff" "#4195ef"]
+   :snake     ["ୡ" "#0bc815"]
+   })
 
-(def entities
-  {:tweezers {:name "Tweezers"
-              :description "An old rusty pair of tweezers"
+(def entity-types
+  {:tweezers {:name "Rusty Tweezers"
+              :description "An old rusty pair of tweezers, bent out of shape."
+              :tile ["𒀹" "#b7b7c1"]
               :weight 1}
    :sassafras {:name "Sassafras Bark"
                :description "It emits a pleasant, herbal aroma. Makes you crave for rootbeer."
+               :tile ["γ" "#a19c6f"]
                :weight 1}
    :sandwich {:name "Sandwich"
+              :tile ["◣" "#ff5733"]
               :description "A sandwich with an unidentifiable vegan spread, lettuce, and tomato. The bread has gone a little soggy."}
+   :horseshoe {:name "Horseshoe"
+               :tile ["Ი" "#b7b7c1"]
+               :description "A bent piece of metal. It makes for a fine shoe, if you're a horse."}
+   :goblet {:name "Goblet"
+            :tile ["ტ" "#8ec4ff"]}
    })
 
 (def base-keymap
@@ -41,7 +50,8 @@
    :RIGHT  :player/move-self
    :UP     :player/move-self
    :DOWN   :player/move-self
-   :ESCAPE :menu/show-global})
+   :ESCAPE :menu/show-global
+   :I      :menu/inventory})
 
 (defn build-map! []
   (let [gen (gen:cellular-gen)]
@@ -51,7 +61,8 @@
     (.connect gen
       (fn [x y val]
         (e:env-set! x y (if (= 0 val)
-                          {:type :wall}
+                          {:type :wall
+                           :blocks-vision? true}
                           {:type :air})))
       1))
 
@@ -66,7 +77,8 @@
 (defn init! []
   (e:init!
     {:display-opts display-opts
-     :tiles tiles
+     :tiles (into tiles
+              (update-vals entity-types :tile))
      :keymaps [base-keymap]
      :entities {}})
 
@@ -78,6 +90,11 @@
        :y y
        :tile :player
        :passable #{:air}
+       :traits #{:active}
+       :state :controller
+       :reputation {:snake -1}
+       :speed 1
+       :vision 40
        :inventory [[:sassafras (rand-int 12)]
                    [:tweezers 1]
                    [:tweezers 1]
@@ -85,23 +102,40 @@
                    [:tweezers 1]
                    [:sandwich 1]]}))
 
+  (e:ent-set! :snake
+    (let [[x y] (e:empty-spot #{:air})]
+      {:x x
+       :y y
+       :tile :snake
+       :passable #{:air}
+       :traits #{:active}
+       :state :controller
+       :speed 2
+       :vision 10
+       :inventory [[:goblet 1]
+                   [:horseshoe 1]]}))
+
+  (e:start-engine!)
+
   (e:redraw!))
 
 (defmethod e:do-action :player/move-self [{:keys [keyname]}]
-  (cond
-    (= :LEFT keyname)
-    (e:try-move-by! :player -1 0)
+  (when-let [controller (:controller @e:state)]
+    (when
+      (cond
+        (= :LEFT keyname)
+        (e:try-move-by! controller -1 0)
 
-    (= :RIGHT keyname)
-    (e:try-move-by! :player 1 0)
+        (= :RIGHT keyname)
+        (e:try-move-by! controller 1 0)
 
-    (= :UP keyname)
-    (e:try-move-by! :player 0 -1)
+        (= :UP keyname)
+        (e:try-move-by! controller 0 -1)
 
-    (= :DOWN keyname)
-    (e:try-move-by! :player 0 1))
-  (e:redraw!))
-
+        (= :DOWN keyname)
+        (e:try-move-by! controller 0 1))
+      (e:tick! controller (/ 100 (:speed (e:entv controller))))
+      (e:redraw!))))
 
 (def action-menu
   {:title "ACTIONS"
@@ -119,15 +153,33 @@
 (defmethod e:do-action :menu/inventory [_]
   (e:show-menu!
     {:title "  INVENTORY  "
-     :items (for [[item qty] (:inventory (e:entv :player))]
+     :items (for [[item qty] (:inventory (e:entv (:controller @e:state)))]
               {:title (str (str:pad-start (str qty) 3 " ")
                         " "
-                        (get-in entities [item :name]))})})
+                        (get-in entity-types [item :name]))
+               :glyph (e:tile item)
+               :qty qty
+               :item item
+               :entity (get entity-types item)
+               :action :inventory/show-item})})
   (e:redraw!))
 
-(defmethod e:do-action :menu/dispatch [_]
-  (let [menu (last (:dialogs @e:state))
-        item (nth (:items menu) (:selected menu))]
-    (e:do-action {:type (:action item)})))
+(defmethod e:do-action :inventory/show-item [{:keys [entity item qty] :as e}]
+  (let [{:keys [tile name description eid]} entity]
+    (e:show-dialog!
+      {:title [tile [" "] [name]]
+       :text [[description]]
+       :keymap {:D [:inventory/drop {:item item
+                                     :from eid
+                                     :qty qty}]}}))
+  (e:redraw!))
+
+(defmethod e:do-action :inventory/drop [{:keys [item qty from]}]
+  (println "DROP" item qty from)
+  (let [{:keys [x y]} (e:entv from)]
+    (e:ent-set! (e:new-eid) {:x x
+                             :y y
+                             :tile item}))
+  (e:redraw!))
 
 (init!)

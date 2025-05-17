@@ -1,5 +1,6 @@
 (module dialogs
-  "Render menus/dialogs as boxes")
+  "Render menus/dialogs as boxes"
+  (:import piglet:string))
 
 (def chars (zipmap [:tl :tr :bl :br :h :v] "╭╮╰╯─│"))
 
@@ -11,9 +12,20 @@
         ch s]
     [ch (or fg border-color) (or bg bg-color)]))
 
-(defn render-box [lines]
-  (let [lines (map render-line lines)
-        width (apply max (map count lines))]
+(defn render-box [line-specs]
+  (let [lines (map render-line line-specs)
+        width (apply max (map count lines))
+        lines (map (fn [l s]
+                     (if (:center (meta s))
+                       (let [pad (/ (max 0 (- width (count l))) 2)
+                             pad-start (js:Math.floor pad)
+                             pad-end   (js:Math.ceil pad)]
+                         (concat
+                           (repeat pad-start [" " nil bg-color])
+                           l
+                           (repeat pad-end [" " nil bg-color])))
+                       l))
+                lines line-specs)]
     (for [j (range (+ (count lines) 2))]
       (for [i (range (+ width 2))]
         (cond
@@ -36,7 +48,8 @@
           [(get chars :h) border-color bg-color]
 
           :else
-          (or (nth (nth lines (dec j)) (dec i))
+          (or
+            (nth (nth lines (dec j)) (dec i))
             [" " border-color bg-color]))))))
 
 (defn render-menu [items selected-idx]
@@ -60,3 +73,22 @@
             y (range lines)]
       (assoc-in! res [(+ y dy) (+ x dx)] (nth (nth dialog y) x)))
     res))
+
+(defn split-line
+  "Takes a line consisting of [string fg bg] segments, returns an array of
+  lines, such that no line has more than max-width characters, by splitting on
+  whitespace"
+  [segments max-width]
+  (let [word-segs (mapcat (fn [[s fg bg]]
+                            (for [w (string:split #"(?<=\s)" s)]
+                              [w fg bg]))
+                    segments)]
+    (let [[acc line] (reduce
+                       (fn [[acc line] [w fg bg :as seg]]
+                         (if (< max-width (apply + (count w) (map (comp count first) line)))
+                           [(conj acc (update-in line [(dec (count line)) 0] string:trim))
+                            [seg]]
+                           [acc (conj line seg)]))
+                       [[] []]
+                       word-segs)]
+      (conj acc line))))
