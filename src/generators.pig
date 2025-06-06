@@ -1,14 +1,33 @@
 (module generators
   (:import
     [e :from engine]
-    [rot :from "rot-js"]))
+    [rot :from "rot-js"]
+    [g :from tilegrids]
+    ))
 
-(defn cellular-gen []
+(defn cellular-gen [{:keys [width height]}]
   (rot:Map.Cellular.
-    (e:viewport-width)
-    (e:viewport-height)
+    width
+    height
     #js {:born [5 6 7 8]
          :survive [4 5 6 7 8]}))
+
+(defn build-cellural-map [grid {:keys [random wall-tile open-tile iterations]
+                                :or {random 0.5 iterations 2}}]
+  (let [gen (cellular-gen {:width (g:width grid) :height (g:height grid)})]
+    (.randomize gen 0.5)
+    (dotimes [_ iterations]
+      (.create gen identity))
+    (.connect gen
+      (fn [x y val]
+        (g:write grid x y (if (= 0 val) wall-tile open-tile)))
+      1))
+  grid)
+
+(comment
+  (build-cellural-map (g:FixedTileGrid. 20 20)
+  {:wall-tile :wall
+   :open-tile :air}))
 
 (defn gen-lake [size]
   (let [lake #{(e:empty-spot #{:air})}
@@ -39,4 +58,4 @@
       {:x x
        :y y
        :blocks-vision? true
-       :tile :tree})))
+       :type :tree})))

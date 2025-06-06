@@ -2,9 +2,11 @@
   "Game state, generic logic, and rendering"
   (:import
     [dialogs :from dialogs]
-    [str :from piglet:string]
+    [dom :from piglet:dom]
+    [g :from tilegrids]
     [rot :from "rot-js"]
-    [dom :from piglet:dom]))
+    [str :from piglet:string]
+    ))
 
 (def display
   "Rot.js Display instance, wrapping a HTML Canvas"
@@ -14,7 +16,11 @@
   "Game state"
   (box
     #js
-    {:display-opts {}
+    {:grid nil
+     :map-grid nil
+     :entities-grid nil
+     :fov-grid nil
+     :display-opts {}
      :keymaps []
      :dialogs []
      :environment []
@@ -47,8 +53,14 @@
 (defn entswap! [eid f & args]
   (apply swap! state update-in [:entities eid] f args))
 
+(defn grid []
+  (:grid @state))
+
+(defn map-grid []
+  (:map-grid @state))
+
 (defn env-by-coords [x y]
-  (get-in @state [:environment y x]))
+  (g:read (grid) x y))
 
 (defn tile [t]
   (get-in @state [:tiles t]))
@@ -75,21 +87,9 @@
 
 (defn env-set!
   ([x y val]
-    (swap! state update
-      :environment
-      (fnil update [])
-      y
-      (fnil assoc [])
-      x
-      val))
+    (g:write (grid) x y val))
   ([x y k v]
-    (swap! state update
-      :environment
-      (fnil update [])
-      y
-      (fnil update [])
-      x
-      assoc k v)))
+    (g:write (grid) x y (assoc (g:read (grid) x y) k v))))
 
 (defn ent-set!
   ([eid val]
@@ -119,9 +119,8 @@
 ;; Drawing
 
 (defn fov-fn []
-  (let [map (:environment @state)
-        entities #js {}]
-    (doseq [{:keys [x y blocks-vision?]} (vals (:entities @state))
+  (let [entities #js {}]
+    (doseq [[x y {:keys [blocks-vision?]}] (grid)
             :when (and x y blocks-vision?)]
       (update! entities x (fnil assoc! #js {}) y true))
     (fn light-passes [x y]
@@ -160,6 +159,11 @@
             [char fg bg] (tile type)]
         (draw! x y char fg bg)))))
 
+(defn draw-grid! [grid]
+  (doseq [[x y {:keys [type] :as t}] grid]
+    (let [[char fg bg] (tile type)]
+      (draw! x y char fg bg))))
+
 (defn draw-entities! [entities dialog visible]
   (doseq [[eid {:keys [x y] tile-type :tile}] entities
           :when (and tile x y (not (get-in dialog [y x])))
@@ -187,7 +191,6 @@
     (viewport-height)))
 
 (defmethod render-dialog :dialog [{:keys [title text buttons] :as dialog}]
-  (println dialog)
   (dialogs:draw-center
     (dialogs:render-box
       (map #(with-meta % {:center true})
@@ -199,12 +202,15 @@
 
 (defn redraw! []
   (let [start-ms (js:performance.now)
-        {:keys [environment entities dialogs display]} @state
+        {:keys [grid entity-grid entities dialogs display]} @state
         dialog (some-> dialogs last render-dialog)
         visible (some-> @state :controller efov)]
     (.clear display)
-    (draw-env! environment dialog visible)
-    (draw-entities! entities dialog visible)
+    (.clear entity-grid)
+    (into! entity-grid (vals entities))
+    (draw-grid! grid)
+    ;; (draw-env! environment dialog visible)
+    ;; (draw-entities! entities dialog visible)
     (println "redraw took " (str (- (js:performance.now) start-ms) "ms") (str "(" (/ 1000 (- (js:performance.now) start-ms))" fps)"))))
 
 ;; Actions
@@ -227,12 +233,18 @@
                     :keycode c})))))
 
 (defn init! [opts]
-  (let [display (rot:Display. (into #js {} (:display-opts opts)))]
+  (let [{:keys [width height]}  (:display-opts opts)
+        display (rot:Display. (into #js {} (:display-opts opts)))
+        map-grid (g:FixedTileGrid. width height)
+        entity-grid (g:FixedTileGrid. width height)]
     (swap! state (fn [state]
                    (assoc
                      (merge state opts)
                      :display display
-                     :queue (rot:EventQueue.))))
+                     :queue (rot:EventQueue.)
+                     :map-grid map-grid
+                     :entity-grid entity-grid
+                     :grid (g:LayeredGrid. [entity-grid map-grid]))))
     (dom:listen! js:window ::keyboard "keydown" #'on-keydown)
     (dom:append
       (dom:query-one "#app")
@@ -321,3 +333,8 @@
     (doseq [{:keys [eid] :as e} (eids-by-trait :active)]
       (.add q eid (if (number? eid) eid 0))))
   (tick!))
+
+;; (keep identity (:entity-grid @state))
+;; (keep identity (:grid @state))
+
+;; (g:read  (:grid @state) 1 0)

@@ -6,7 +6,8 @@
     [e :from engine]
     [gen :from generators]
     [rot :from "rot-js"]
-    [str :from piglet:string]))
+    [str :from piglet:string]
+    [g :from tilegrids]))
 
 (def display-opts
   {:width 60
@@ -23,7 +24,7 @@
    :tree   ["Λ" "#0bc815"]
    :ram    ["Ꮘ" "#a19c6f"]
    :water  ["≋" "#8ec4ff" "#4195ef"]
-   :snake     ["ୡ" "#0bc815"]
+   :snake  ["ୡ" "#0bc815"]
    })
 
 (def entity-types
@@ -53,22 +54,16 @@
    :ESCAPE :menu/show-global
    :I      :menu/inventory})
 
-(defn build-map! []
-  (let [gen (gen:cellular-gen)]
-    (.randomize gen 0.5)
-    (.create gen identity)
-    (.create gen identity)
-    (.connect gen
-      (fn [x y val]
-        (e:env-set! x y (if (= 0 val)
-                          {:type :wall
-                           :blocks-vision? true}
-                          {:type :air})))
-      1))
+(defn build-map! [grid]
+  (gen:build-cellural-map grid
+    {:wall-tile {:type :wall
+                 :blocks-vision? true}
+     :open-tile {:type :air}})
 
-  (dotimes [_ 5]
-    (doseq [[x y] (gen:gen-lake (+ 5 (rand-int 10)))]
-      (e:env-set! x y {:type :water})))
+
+  ;; (dotimes [_ 5]
+  ;;   (doseq [[x y] (gen:gen-lake (+ 5 (rand-int 10)))]
+  ;;     (e:env-set! x y {:type :water})))
 
   (dotimes [_ 10]
     (gen:add-tree!))
@@ -82,13 +77,15 @@
      :keymaps [base-keymap]
      :entities {}})
 
-  (build-map!)
+  (println (e:map-grid))
+
+  (build-map! (e:map-grid))
 
   (e:ent-set! :player
     (let [[x y] (e:empty-spot #{:air})]
       {:x x
        :y y
-       :tile :player
+       :type :player
        :passable #{:air}
        :traits #{:active}
        :state :controller
@@ -106,10 +103,10 @@
     (let [[x y] (e:empty-spot #{:air})]
       {:x x
        :y y
-       :tile :snake
+       :type :snake
        :passable #{:air}
        :traits #{:active}
-       :state :controller
+       :state :idle
        :speed 2
        :vision 10
        :inventory [[:goblet 1]
@@ -182,4 +179,4 @@
                              :tile item}))
   (e:redraw!))
 
-(init!)
+#_(init!)
