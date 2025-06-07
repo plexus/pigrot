@@ -5,9 +5,16 @@
   (width [this])
   (height [this])
   (write [this x y val])
-  (read [this x y]))
+  (read [this x y])
+  (update-xy [this x y f & args])
+  (reduce-xyt [this f init]))
 
 (deftype BaseGrid
+  TileGrid
+  (update-xy [this x y f & args]
+    (write this x y (apply f (read this x y) args))
+    this)
+
   MutableCollection
   (-conj! [this v]
     (if (vector? v)
@@ -28,7 +35,9 @@
   (constructor [width height]
     (set! (.-width this) width)
     (set! (.-height this) height)
-    (set! (.-tiles this) (js:Array (* width height)))
+    ;; Make sure we don't end up with a sparse array, we don't want that here
+    (set! (.-tiles this)
+      (into [] (map (constantly nil) (range (* width height)))))
     nil)
 
   (clear [] (set! (.-tiles this) []))
@@ -45,6 +54,13 @@
     (oget
       (.-tiles this)
       (+ x (* y (.-width this)))))
+  (reduce-xyt [this f init]
+    (let [w (.-width this)
+          v (box init)]
+      (.forEach (.-tiles this)
+        (fn [t idx]
+          (swap! v f (mod idx w) (quot idx w) t)))
+      @v))
 
   Seqable
   (-seq [this]
@@ -69,6 +85,16 @@
           (recur (inc i))))))
   (write [this x y v]
     (throw (js:Error. "Can't write to LayeredGrid, write to individual layers")))
+
+  (reduce-xyt [this f init]
+    (let [w (width this)
+          overlays (butlast (.-layers this))
+          bottom (last (.-layers this))]
+      (reduce-xyt bottom
+        (fn [acc x y t]
+          (let [u (some #(read % x y) overlays)]
+            (f acc x y (or u t))))
+        init)))
 
   Seqable
   (-seq [this]
@@ -124,51 +150,56 @@
       (+ y (.-cy this)))
     v))
 
-
 (comment
   (do
     (def g (FixedTileGrid. 3 3))
     (def s (SparseGrid. 3 3))
     (write g 1 1 {:t 0})
+    (write g 0 1 {:t 2})
     (write s 2 2 {:t 1})
-    (seq (LayeredGrid. [s g])))
-
-  (do
-    (def g (FixedTileGrid. 100 100))
-    (def s (SparseGrid. 100 100))
-    (write g 99 98 {:t 0})
-    (write s 99 99 {:t 1})
     (def l (LayeredGrid. [s g])))
 
-  (do
-    (time (count (seq g)))
-    (time (count (seq s)))
-    (time (count (seq l)))))
+  (reduce-xyt l (fn [acc x y t]
+                  (conj acc [x y t])) [])
 
-(time
-  (count
-    (js:Array. 100000000)))
+  )
 
-(type-name (seq
-             (js:Array. 1000000)))
+;;   (do
+;;     (def g (FixedTileGrid. 100 100))
+;;     (def s (SparseGrid. 100 100))
+;;     (write g 99 98 {:t 0})
+;;     (write s 99 99 {:t 1})
+;;     (def l (LayeredGrid. [s g])))
 
-(.-iterable
-  (seq [1 2 3]))
+;;   (do
+;;     (time (count (seq g)))
+;;     (time (count (seq s)))
+;;     (time (count (seq l)))))
 
-(.-iterable
-  (.of_iterable IteratorSeq [1 2 3]))
+;; (time
+;;   (count
+;;     (js:Array. 100000000)))
 
-(time
-  (reduce
-    (fn [acc _] (inc acc))
-    0
-    (seq
-      (js:Array. 1000000))))
+;; (type-name (seq
+;;              (js:Array. 1000000)))
 
-(def a [1 2 3]))
-(def s (seq a))
+;; (.-iterable
+;;   (seq [1 2 3]))
 
-(.unshift a 4)
+;; (.-iterable
+;;   (.of_iterable IteratorSeq [1 2 3]))
 
-(defn foo [g]
-  (read g 1 2))
+;; (time
+;;   (reduce
+;;     (fn [acc _] (inc acc))
+;;     0
+;;     (seq
+;;       (js:Array. 1000000))))
+
+;; (def a [1 2 3]))
+;; (def s (seq a))
+
+;; (.unshift a 4)
+
+;; (defn foo [g]
+;;   (read g 1 2))

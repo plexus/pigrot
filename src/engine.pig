@@ -137,7 +137,7 @@
     (.compute (fov-instance)
       x y r
       (fn [x y r visible?]
-        (when (and visible?)
+        (when (and visible? (<= 0 x) (<= 0 y))
           (update! fov x (fnil assoc! #js {}) y true))))
     fov))
 
@@ -159,10 +159,32 @@
             [char fg bg] (tile type)]
         (draw! x y char fg bg)))))
 
-(defn draw-grid! [grid]
-  (doseq [[x y {:keys [type] :as t}] grid]
-    (let [[char fg bg] (tile type)]
-      (draw! x y char fg bg))))
+(defn faded-fg-color [ticks]
+  (let [rounds (/ ticks 210)
+        gray-val (js:Math.round (max 0 (- 83 rounds)))
+        hex-val (str:pad-start (.toString gray-val 16) 2 "0")]
+    (str "#" hex-val hex-val hex-val)))
+
+(defn faded-bg-color [ticks]
+  (let [rounds (/ ticks 210)
+        gray-val (js:Math.round (max 0 (- 31 rounds)))
+        hex-val (str:pad-start (.toString gray-val 16) 2 "0")]
+    (str "#" hex-val hex-val hex-val)))
+
+(defn draw-grid! [base-grid entity-grid tick]
+  (g:reduce-xyt base-grid
+    (fn [_ x y {:keys [type last-seen] :as t}]
+      (when last-seen
+        (let [[base-char _ base-bg] (tile type)
+              t (or (g:read entity-grid x y) t)
+              {:keys [type]} t
+              [char fg bg] (tile type)]
+          (if (= last-seen tick)
+            (draw! x y char fg (or bg base-bg))
+            (draw! x y base-char
+              (faded-fg-color (- tick last-seen))
+              (faded-bg-color (- tick last-seen)))))))
+    nil))
 
 (defn draw-entities! [entities dialog visible]
   (doseq [[eid {:keys [x y] tile-type :tile}] entities
@@ -200,15 +222,21 @@
     (viewport-width)
     (viewport-height)))
 
+
 (defn redraw! []
   (let [start-ms (js:performance.now)
-        {:keys [grid entity-grid entities dialogs display]} @state
+        {:keys [grid map-grid entity-grid entities dialogs display]} @state
         dialog (some-> dialogs last render-dialog)
-        visible (some-> @state :controller efov)]
+        visible (some-> @state :controller efov)
+        tick (.getTime (queue))]
+    (doseq [[x col] visible
+            [y] col]
+      (println [x y])
+      (g:update-xy map-grid (parse-long x) (parse-long y) assoc :last-seen tick))
     (.clear display)
     (.clear entity-grid)
     (into! entity-grid (vals entities))
-    (draw-grid! grid)
+    (draw-grid! map-grid entity-grid tick)
     ;; (draw-env! environment dialog visible)
     ;; (draw-entities! entities dialog visible)
     (println "redraw took " (str (- (js:performance.now) start-ms) "ms") (str "(" (/ 1000 (- (js:performance.now) start-ms))" fps)"))))
@@ -233,7 +261,7 @@
                     :keycode c})))))
 
 (defn init! [opts]
-  (let [{:keys [width height]}  (:display-opts opts)
+  (let [{:keys [width height]} (:display-opts opts)
         display (rot:Display. (into #js {} (:display-opts opts)))
         map-grid (g:FixedTileGrid. width height)
         entity-grid (g:FixedTileGrid. width height)]

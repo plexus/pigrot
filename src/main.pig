@@ -17,7 +17,7 @@
    :fontFamily "'Victor Mono',monospace"})
 
 (def tiles
-  {:wall   ["#" "#874f15" "#573703"]
+  {:wall   ["⨇" "#874f15" "#573703"]
    :lava   ["$" "#ea1313" "#ff5733"]
    :air    ["·" "#1535a0" "#1f1f26"]
    :player ["@" "#DAF7A6"]
@@ -43,8 +43,7 @@
                :tile ["Ი" "#b7b7c1"]
                :description "A bent piece of metal. It makes for a fine shoe, if you're a horse."}
    :goblet {:name "Goblet"
-            :tile ["ტ" "#8ec4ff"]}
-   })
+            :tile ["ტ" "#8ec4ff"]}})
 
 (def base-keymap
   {:LEFT   :player/move-self
@@ -66,8 +65,7 @@
   ;;     (e:env-set! x y {:type :water})))
 
   (dotimes [_ 10]
-    (gen:add-tree!))
-  )
+    (gen:add-tree!)))
 
 (defn init! []
   (e:init!
@@ -76,8 +74,6 @@
               (update-vals entity-types :tile))
      :keymaps [base-keymap]
      :entities {}})
-
-  (println (e:map-grid))
 
   (build-map! (e:map-grid))
 
@@ -172,11 +168,10 @@
   (e:redraw!))
 
 (defmethod e:do-action :inventory/drop [{:keys [item qty from]}]
-  (println "DROP" item qty from)
   (let [{:keys [x y]} (e:entv from)]
     (e:ent-set! (e:new-eid) {:x x
                              :y y
                              :tile item}))
   (e:redraw!))
 
-#_(init!)
+(init!)
