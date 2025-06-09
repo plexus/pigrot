@@ -203,7 +203,8 @@
     nil))
 
 (defn draw-hud! []
-  (.drawText (:display @state) 1 0 "HP 10 / 27"))
+  (let [{:keys [hp max-hp]} (entv :player)]
+    (.drawText (:display @state) 1 0 (str "HP " hp " / " max-hp))))
 
 (defn draw-entities! [entities dialog visible]
   (doseq [[eid {:keys [x y] tile-type :tile}] entities
