@@ -271,6 +271,7 @@
         keymap (last (:keymaps @state))]
     ;; (println "KEY" k "ACTION" (get keymap k))
     (when-let [action (get keymap k)]
+      (.preventDefault e)
       (if (vector? action)
         (do-action
           (merge (second action)
@@ -279,7 +280,8 @@
              :keycode c}))
         (do-action {:type action
                     :keyname k
-                    :keycode c})))))
+                    :keycode c}))
+      false)))
 
 (defn init! [opts]
   (let [{:keys [width height]} (:display-opts opts)
