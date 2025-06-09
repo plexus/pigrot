@@ -87,7 +87,9 @@
        :state :controller
        :reputation {:snake -1}
        :speed 1
-       :vision 40
+       :vision 20
+       :hp 9
+       :max-hp 9
        :inventory [[:sassafras (rand-int 12)]
                    [:tweezers 1]
                    [:tweezers 1]
@@ -102,8 +104,8 @@
        :type :snake
        :passable #{:air}
        :traits #{:active}
-       :state :idle
-       :speed 2
+       :state :scanning
+       :speed 0.9
        :vision 10
        :inventory [[:goblet 1]
                    [:horseshoe 1]]}))
@@ -144,34 +146,38 @@
   (e:redraw!))
 
 (defmethod e:do-action :menu/inventory [_]
-  (e:show-menu!
+  (let [controller (e:entv (:controller @e:state))]
+    (e:show-menu!
     {:title "  INVENTORY  "
-     :items (for [[item qty] (:inventory (e:entv (:controller @e:state)))]
+     :items (for [[item qty] (:inventory controller)]
               {:title (str (str:pad-start (str qty) 3 " ")
                         " "
                         (get-in entity-types [item :name]))
                :glyph (e:tile item)
                :qty qty
                :item item
+               :from controller
                :entity (get entity-types item)
-               :action :inventory/show-item})})
+               :action :inventory/show-item})}))
   (e:redraw!))
 
-(defmethod e:do-action :inventory/show-item [{:keys [entity item qty] :as e}]
+(defmethod e:do-action :inventory/show-item [{:keys [entity from item qty] :as e}]
+  (println "CONTROLLER" from)
   (let [{:keys [tile name description eid]} entity]
     (e:show-dialog!
       {:title [tile [" "] [name]]
        :text [[description]]
        :keymap {:D [:inventory/drop {:item item
-                                     :from eid
+                                     :from (:eid from)
                                      :qty qty}]}}))
   (e:redraw!))
 
-(defmethod e:do-action :inventory/drop [{:keys [item qty from]}]
+(defmethod e:do-action :inventory/drop [{:keys [item qty from] :as action}]
+  (println "ACTION" action)
   (let [{:keys [x y]} (e:entv from)]
     (e:ent-set! (e:new-eid) {:x x
                              :y y
-                             :tile item}))
+                             :type item}))
   (e:redraw!))
 
 (init!)

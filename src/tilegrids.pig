@@ -25,11 +25,8 @@
 
   Seqable
   (-seq [this]
-    (for [y (range (height this))
-          x (range (width this))
-          :let [t (read this x y)]]
-      (when t
-        [x y t]))))
+    (seq
+      (reduce-xyt this (fn [acc x y t] (conj! acc t)) []))))
 
 (deftype FixedTileGrid :extends BaseGrid
   (constructor [width height]
@@ -60,16 +57,39 @@
       (.forEach (.-tiles this)
         (fn [t idx]
           (swap! v f (mod idx w) (quot idx w) t)))
-      @v))
+      @v)))
 
-  Seqable
-  (-seq [this]
-    (let [w (.-width this)]
-      (seq
-        (.map (.-tiles this)
-          (fn [t idx]
-            (when t
-              [(mod idx w) (quot idx w) t])))))))
+(deftype RectGrid :extends BaseGrid
+  (constructor [width height]
+    (set! (.-width this) width)
+    (set! (.-height this) height)
+    ;; Make sure we don't end up with a sparse array, we don't want that here
+    (set! (.-tiles this)
+      (mapv #(mapv (constantly nil) (range width)) (range height)))
+    nil)
+
+  (clear []
+    (let [{:props [width height]} this]
+      (set! (.-tiles this)
+        (mapv #(mapv (constantly nil) (range width)) (range height)))))
+
+  TileGrid
+  (width [this] (.-width this))
+  (height [this] (.-height this))
+  (write [this x y v]
+    (set! (oget (oget (.-tiles this) y) x)
+      v))
+  (read [this x y]
+    (oget (oget (.-tiles this) y) x))
+  (reduce-xyt [this f init]
+    (let [w (.-width this)
+          v (box init)]
+      (.forEach (.-tiles this)
+        (fn [row y]
+          (.forEach row
+            (fn [t x]
+              (swap! v f x y t)))))
+      @v)))
 
 (deftype LayeredGrid :extends BaseGrid
   :fields [(layers [])]
@@ -94,23 +114,7 @@
         (fn [acc x y t]
           (let [u (some #(read % x y) overlays)]
             (f acc x y (or u t))))
-        init)))
-
-  Seqable
-  (-seq [this]
-    (let [w (width this)
-          top (first (.-layers this))
-          bottom (last (.-layers this))]
-      (seq
-        (js:Array.from
-          (seq bottom)
-          (fn [t idx]
-            (let [x (mod idx w)
-                  y (quot idx w)
-                  u (read top x y)]
-              (or
-                (and u [x y u])
-                t))))))))
+        init))))
 
 (deftype SparseGrid :extends BaseGrid
   :fields [width height (tiles #js {})]
@@ -152,7 +156,7 @@
 
 (comment
   (do
-    (def g (FixedTileGrid. 3 3))
+    (def g (RectGrid. 3 3))
     (def s (SparseGrid. 3 3))
     (write g 1 1 {:t 0})
     (write g 0 1 {:t 2})

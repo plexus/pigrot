@@ -50,7 +50,7 @@
 (defn entv [eid]
   (get-in @state [:entities eid]))
 
-(defn entswap! [eid f & args]
+(defn ent-swap! [eid f & args]
   (apply swap! state update-in [:entities eid] f args))
 
 (defn grid []
@@ -58,6 +58,9 @@
 
 (defn map-grid []
   (:map-grid @state))
+
+(defn entity-grid []
+  (:entity-grid @state))
 
 (defn env-by-coords [x y]
   (g:read (grid) x y))
@@ -101,7 +104,7 @@
   (filter (comp t :traits) (vals (:entities @state))))
 
 (defn move-by! [eid dx dy]
-  (entswap! eid
+  (ent-swap! eid
     (fn [pos]
       (-> pos
         (update :x + dx)
@@ -112,22 +115,24 @@
         x (+ x dx)
         y (+ y dy)]
     (when (passable? eid x y)
-      (entswap! eid
+      (ent-swap! eid
         #(-> % (update :x + dx) (update :y + dy)))
       true)))
 
 ;; Drawing
 
 (defn fov-fn []
-  (let [entities #js {}]
-    (doseq [[x y {:keys [blocks-vision?]}] (grid)
-            :when (and x y blocks-vision?)]
-      (update! entities x (fnil assoc! #js {}) y true))
+  (let [g #_(box #{}) (g:FixedTileGrid. (viewport-width) (viewport-height))]
+    (g:reduce-xyt
+      (grid)
+      (fn [_ x y t]
+        (when (:blocks-vision? t)
+          #_(swap! g conj [x y])
+
+          (g:write g x y true)))
+      nil)
     (fn light-passes [x y]
-      (not
-        (or
-          (get-in map [y x :blocks-vision?])
-          (get-in entities [x y]))))))
+      (not #_(get @g [x y]) (g:read g x y)))))
 
 (defn fov-instance []
   (rot:FOV.PreciseShadowcasting. (fov-fn)))
@@ -144,6 +149,14 @@
 (defn efov [eid]
   (let [{:keys [x y vision]} (entv eid)]
     (fov x y vision)))
+
+(defn visible-entities [eid]
+  (let [fov (efov eid)]
+    (filter (fn [{:keys [x y] :as e}]
+              (and
+                (not= (:eid e) eid)
+                (get-in fov [x y])))
+      (:entity-grid @state))))
 
 (defn draw! [x y ch fg bg]
   (.draw (:display @state) x y ch fg bg))
@@ -171,20 +184,26 @@
         hex-val (str:pad-start (.toString gray-val 16) 2 "0")]
     (str "#" hex-val hex-val hex-val)))
 
-(defn draw-grid! [base-grid entity-grid tick]
+(defn draw-grid! [tick dialog overlay-grid entity-grid base-grid]
   (g:reduce-xyt base-grid
     (fn [_ x y {:keys [type last-seen] :as t}]
-      (when last-seen
-        (let [[base-char _ base-bg] (tile type)
-              t (or (g:read entity-grid x y) t)
-              {:keys [type]} t
-              [char fg bg] (tile type)]
-          (if (= last-seen tick)
-            (draw! x y char fg (or bg base-bg))
-            (draw! x y base-char
-              (faded-fg-color (- tick last-seen))
-              (faded-bg-color (- tick last-seen)))))))
+      (if-let [d (get-in dialog [y x])]
+        (let [[char fg bg] d]
+          (draw! x y char fg bg))
+        (when last-seen
+          (let [[base-char _ base-bg] (tile type)
+                t (or (g:read entity-grid x y) t)
+                {:keys [type]} t
+                [char fg bg] (tile type)]
+            (if (= last-seen tick)
+              (draw! x (inc y) char fg (or bg base-bg))
+              (draw! x (inc y) base-char
+                (faded-fg-color (- tick last-seen))
+                (faded-bg-color (- tick last-seen))))))))
     nil))
+
+(defn draw-hud! []
+  (.drawText (:display @state) 1 0 "HP 10 / 27"))
 
 (defn draw-entities! [entities dialog visible]
   (doseq [[eid {:keys [x y] tile-type :tile}] entities
@@ -225,18 +244,18 @@
 
 (defn redraw! []
   (let [start-ms (js:performance.now)
-        {:keys [grid map-grid entity-grid entities dialogs display]} @state
+        {:keys [grid map-grid entity-grid overlay-grid entities dialogs display]} @state
         dialog (some-> dialogs last render-dialog)
         visible (some-> @state :controller efov)
         tick (.getTime (queue))]
     (doseq [[x col] visible
             [y] col]
-      (println [x y])
       (g:update-xy map-grid (parse-long x) (parse-long y) assoc :last-seen tick))
     (.clear display)
     (.clear entity-grid)
     (into! entity-grid (vals entities))
-    (draw-grid! map-grid entity-grid tick)
+    (draw-hud!)
+    (draw-grid! tick dialog overlay-grid entity-grid map-grid)
     ;; (draw-env! environment dialog visible)
     ;; (draw-entities! entities dialog visible)
     (println "redraw took " (str (- (js:performance.now) start-ms) "ms") (str "(" (/ 1000 (- (js:performance.now) start-ms))" fps)"))))
@@ -249,6 +268,7 @@
   (let [c (.-keyCode e)
         k (get keycodes c)
         keymap (last (:keymaps @state))]
+    ;; (println "KEY" k "ACTION" (get keymap k))
     (when-let [action (get keymap k)]
       (if (vector? action)
         (do-action
@@ -263,8 +283,11 @@
 (defn init! [opts]
   (let [{:keys [width height]} (:display-opts opts)
         display (rot:Display. (into #js {} (:display-opts opts)))
-        map-grid (g:FixedTileGrid. width height)
-        entity-grid (g:FixedTileGrid. width height)]
+        grid-class g:FixedTileGrid
+        hud-grid    (new grid-class width height)
+        dialog-grid (new grid-class width height)
+        map-grid    (new grid-class width height)
+        entity-grid (new grid-class width height)]
     (swap! state (fn [state]
                    (assoc
                      (merge state opts)
@@ -272,7 +295,10 @@
                      :queue (rot:EventQueue.)
                      :map-grid map-grid
                      :entity-grid entity-grid
-                     :grid (g:LayeredGrid. [entity-grid map-grid]))))
+                     :hud-grid hud-grid
+                     :dialog-grid dialog-grid
+                     :grid (g:LayeredGrid. [entity-grid map-grid])
+                     :overlay-grid (g:LayeredGrid. [dialog-grid hud-grid]))))
     (dom:listen! js:window ::keyboard "keydown" #'on-keydown)
     (dom:append
       (dom:query-one "#app")
@@ -347,22 +373,60 @@
 (defmethod handle-state :controller [{:keys [eid] :as e}]
   (swap! state assoc :controller eid))
 
-(defn tick! [eid time]
-  (let [q (queue)]
-    (.add q eid time)
-    (when-let [eid (.get q)]
-      (handle-state (entv eid)))))
+(defn tick!
+  ([]
+    (let [q (queue)]
+      (when-let [eid (.get q)]
+        (handle-state (entv eid))
+        (.add q eid (/ 100 (:speed (entv eid) 1))))))
+  ([eid]
+    (tick! eid 100))
+  ([eid time]
+    (let [q (queue)]
+      (.add q eid (/ time (:speed (entv eid) 1)))
+      (when-let [eid (.get q)]
+        (handle-state (entv eid))))))
 
 (defmethod handle-state :idle [{:keys [eid] :as e}]
-  (tick! eid 100))
+  (tick! eid))
+
+(defmethod handle-state :scanning [{:keys [eid type speed] :as e}]
+  (doseq [e (visible-entities eid)]
+    (when (< (get-in e [:reputation type]) 0)
+      (ent-swap! eid assoc :state :aggro :target (:eid e))))
+  (tick! eid 50))
+
+(defmethod handle-state :aggro [{:keys [eid x y target] :as e}]
+  (let [target (entv target)
+        target-x (:x target)
+        target-y (:y target)
+        astar (rot:Path.AStar.
+                target-x
+                target-y
+                (constantly true) #_
+                (fn [x y]
+                  (let [p (passable? eid x y)]
+                    (println "PASS" eid x y p)
+                    p)))
+        path []]
+    (.compute astar x y (fn [x y]
+                          (println "GOT PATH"  x y)
+                          (conj! path [x y])))
+    (when (seq path)
+      (let [[next-x next-y] (some (fn [loc]
+                                    (when (and
+                                            (not= loc [x y])
+                                            (not= loc [target-x target-y]))
+                                      loc))
+                              path)]
+        (try-move-by! eid (- next-x x) (- next-y y)))))
+
+  (tick! eid))
 
 (defn start-engine! []
   (let [q (queue)]
-    (doseq [{:keys [eid] :as e} (eids-by-trait :active)]
-      (.add q eid (if (number? eid) eid 0))))
+    (doseq [{:keys [eid] :as e} (eids-by-trait :active)
+            :let [ts (if (number? eid) eid 0)]]
+      (println "INIT QUEUE" eid ts)
+      (.add q eid ts)))
   (tick!))
-
-;; (keep identity (:entity-grid @state))
-;; (keep identity (:grid @state))
-
-;; (g:read  (:grid @state) 1 0)
