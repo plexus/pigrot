@@ -399,6 +399,11 @@
       (ent-swap! eid assoc :state :aggro :target (:eid e))))
   (tick! eid 50))
 
+(defn neighbor? [this that]
+  (and
+    (<= -1 (- (:x this) (:x that)) 1)
+    (<= -1 (- (:y this) (:y that)) 1)))
+
 (defmethod handle-state :aggro [{:keys [eid x y target] :as e}]
   (let [target (entv target)
         target-x (:x target)
@@ -422,8 +427,27 @@
                                             (not= loc [target-x target-y]))
                                       loc))
                               path)]
-        (try-move-by! eid (- next-x x) (- next-y y)))))
+        (try-move-by! eid (- next-x x) (- next-y y))))
+    (when (neighbor? (entv eid) target)
+      (ent-swap! eid assoc :state :attacking)))
+  (tick! eid))
 
+(defn shake! [n time]
+  (let [cl (.-classList (dom:query-one "canvas"))
+        kl (str "juicy__shake__" n)]
+    (.add cl kl)
+    (js:setTimeout #(.remove cl kl) time)))
+
+(defmethod handle-state :attacking [{:keys [eid x y target] :as e}]
+  (if (neighbor? (entv eid) (entv target))
+    (do
+      (shake! 4 450)
+      (println
+        (select-keys (entv eid) [:x :y])
+        (select-keys (entv target) [:x :y])
+        (neighbor? (entv eid) (entv target))
+        "ATTACK"))
+    (ent-swap! eid assoc :state :aggro))
   (tick! eid))
 
 (defn start-engine! []
@@ -433,3 +457,5 @@
       (println "INIT QUEUE" eid ts)
       (.add q eid ts)))
   (tick!))
+
+(js:console.log @state)
