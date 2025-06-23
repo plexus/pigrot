@@ -7,7 +7,9 @@
 
 (defn expandable? [o]
   (and (not (string? o))
-    (satisfies? Seqable o)))
+    (or
+      (satisfies? Seqable o)
+      (object? o))))
 
 (declare collapsed inspector)
 
@@ -24,7 +26,7 @@
       [:span.value.key k " "])
     [:span.value (type-name o)]]
    [:div.body
-    (if (satisfies? DictLike o)
+    (if (or (satisfies? DictLike o) (object? o))
       (for [[k v] o]
         [inspector k v])
       (for [v o]
@@ -63,8 +65,10 @@
 (def inspector-div (dom:dom [:div#inspector]))
 
 (do
-  (set! (.-innerHTML inspector) "")
-  (dom:append inspector-div (dom:dom [inspector data])))
+  (set! (.-innerHTML inspector-div) "")
+  (dom:append inspector-div (dom:dom [inspector @engine:state])))
+
+(js:console.log @engine:state)
 
 (dom:append
   (dom:query-one "#app")
@@ -85,6 +89,6 @@
                     :font-family "monospace"}
       [:.prefix {:color "#999"}]
       [:.value {:color "#3b758a"}]]
-     [:.node {:padding-left "0.3rem"}]
+     [:.node {:padding-left "1rem"}]
      [:.expanded {:display "flex" :flex-direction "column"}]
      ]))
