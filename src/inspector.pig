@@ -43,7 +43,7 @@
       (if (expandable? o)
         "⏵ "
         "  ")]
-     (when k [:span.value.key k " "])
+     (when k [:span.value.key k (when-not (keyword? k) ":") " "])
      [:span.value
       (if (expandable? o)
         (type-name o)
